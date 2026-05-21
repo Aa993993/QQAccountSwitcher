@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- 允许明文 HTTP 访问 QQ 登录服务器 -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">ptlogin4.qq.com</domain>
-        <domain includeSubdomains="true">ptlogin2.qq.com</domain>
-        <domain includeSubdomains="true">qq.com</domain>
-        <domain includeSubdomains="true">connect.qq.com</domain>
-        <domain includeSubdomains="true">ui.ptlogin2.qq.com</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>
