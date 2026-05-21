@@ -5,7 +5,7 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  workflow_dispatch:   # 支持手动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -21,34 +21,20 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 📱 Install Android SDK
+      - name: 📱 Set Android SDK path
         run: |
-          # 下载并安装 Android SDK command-line tools
-          mkdir -p $HOME/android-sdk/cmdline-tools
-          cd $HOME/android-sdk/cmdline-tools
-          curl -sL -o cmdline-tools.zip \
-            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
-          unzip -q cmdline-tools.zip
-          mv cmdline-tools latest
-          export ANDROID_HOME=$HOME/android-sdk
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          # Ubuntu 镜像自带 Android SDK
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
 
-          # 接受许可并安装所需组件
-          yes | sdkmanager --sdk_root=$ANDROID_HOME \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
-            "platform-tools" 2>&1 | tail -5
-
-          # 写入 ANDROID_HOME 供后续步骤使用
-          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
-
-      - name: 🔧 Grant execute permission
-        run: chmod +x gradlew
+      - name: 🔧 Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.2
 
       - name: 🏗️ Build Debug APK
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug
+        working-directory: ${{ github.workspace }}
 
       - name: 📦 Upload APK
         uses: actions/upload-artifact@v4
