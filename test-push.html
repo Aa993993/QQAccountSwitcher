@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>QQ 上号器 - 推送测试</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, sans-serif;
+  background: #1E1E1E; color: #fff;
+  padding: 20px; max-width: 500px; margin: 0 auto;
+}
+h1 { font-size: 20px; margin-bottom: 16px; color: #1AAD19; }
+.card {
+  background: #2A2A2A; border-radius: 10px;
+  padding: 16px; margin-bottom: 12px;
+}
+label { display: block; font-size: 13px; color: #999; margin-bottom: 4px; }
+input, textarea {
+  width: 100%; background: #1E1E1E; border: 1px solid #444;
+  color: #fff; border-radius: 6px; padding: 10px; font-size: 14px;
+  margin-bottom: 12px;
+}
+textarea { min-height: 100px; font-family: monospace; font-size: 12px; }
+.btn {
+  background: #1AAD19; color: #fff; border: none;
+  border-radius: 8px; padding: 14px; font-size: 16px;
+  width: 100%; cursor: pointer; font-weight: bold;
+}
+.btn:active { opacity: 0.8; }
+.result {
+  background: #111; border-radius: 6px;
+  padding: 12px; font-family: monospace; font-size: 12px;
+  margin-top: 12px; min-height: 40px;
+  white-space: pre-wrap; word-break: break-all;
+}
+.green { color: #4CAF50; }
+.red { color: #f44336; }
+.status {
+  text-align: center; padding: 20px; margin-bottom: 16px;
+  background: #0D330D; border-radius: 10px;
+  border: 1px solid #1AAD19;
+}
+.status .ip { font-size: 24px; font-weight: bold; color: #1AAD19; }
+.status .label { font-size: 12px; color: #888; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>🦞 QQ 上号器推送测试</h1>
+
+<!-- 上号器状态 -->
+<div class="status" id="status">
+  <div style="font-size:14px;color:#1AAD19;margin-bottom:8px;">📡 上号器地址</div>
+  <div class="ip">
+    <span id="ipDisplay">127.0.0.1</span>:<span id="portDisplay">8888</span>
+  </div>
+  <div class="label" id="statusLabel">点击检查连接</div>
+</div>
+
+<!-- 预填 Token -->
+<div class="card">
+  <label>📋 粘贴你的 token JSON（已预填示例）</label>
+  <textarea id="tokenJson">{
+  "access_token": "256883E169F2999B392C8EE227078347",
+  "expires_in": "5184000",
+  "openid": "12BEBE948CCE4D65DCF6B69438B66F28",
+  "pay_token": "54757BE1498F5670F4100CD9BE858013",
+  "pf": "openmobile_android",
+  "pfkey": "cf3ac4eb09f53f2afeaf8b9a49ce237d"
+}</textarea>
+
+  <div style="display:flex;gap:8px;">
+    <button class="btn" onclick="pushToken()">🚀 推送上号</button>
+  </div>
+</div>
+
+<div class="card">
+  <label>⚙️ 上号器地址设置</label>
+  <div style="display:flex;gap:8px;">
+    <input id="ipInput" value="127.0.0.1" placeholder="IP地址" style="flex:2;margin:0;">
+    <input id="portInput" value="8888" placeholder="端口" style="flex:1;margin:0;">
+  </div>
+</div>
+
+<div class="result" id="result">等待操作...</div>
+
+<script>
+// 读取屏幕上的 IP
+function readScreenIp() {
+  // 用户可以在输入框手动填 IP
+}
+readScreenIp()
+
+function updateUi() {
+  const ip = document.getElementById('ipInput').value;
+  const port = document.getElementById('portInput').value;
+  document.getElementById('ipDisplay').textContent = ip;
+  document.getElementById('portDisplay').textContent = port;
+}
+document.getElementById('ipInput').addEventListener('input', updateUi);
+document.getElementById('portInput').addEventListener('input', updateUi);
+updateUi();
+
+async function pushToken() {
+  const ip = document.getElementById('ipInput').value;
+  const port = document.getElementById('portInput').value;
+  const json = document.getElementById('tokenJson').value;
+  const result = document.getElementById('result');
+  const label = document.getElementById('statusLabel');
+
+  result.textContent = '连接中...';
+  label.textContent = '正在推送...';
+
+  try {
+    const resp = await fetch(`http://${ip}:${port}/inject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: json
+    });
+
+    const text = await resp.text();
+    result.innerHTML = `<span class="green">✅ 成功!</span>\n\n${text}`;
+    label.textContent = '已推送，查看雷电屏幕';
+  } catch (e) {
+    result.innerHTML = `<span class="red">❌ 失败: ${e.message}</span>
+
+请检查:
+1. 上号器是否在运行
+2. IP地址是否正确（看上号器顶部绿色卡片）
+3. 雷电模拟器网络是否正常`;
+    label.textContent = '连接失败';
+  }
+}
+
+async function checkStatus() {
+  const ip = document.getElementById('ipInput').value;
+  const port = document.getElementById('portInput').value;
+  const label = document.getElementById('statusLabel');
+
+  try {
+    const resp = await fetch(`http://${ip}:${port}/`);
+    label.textContent = '✅ 连接正常';
+  } catch (e) {
+    label.textContent = '❌ 无法连接';
+  }
+}
+</script>
+
+</body>
+</html>
