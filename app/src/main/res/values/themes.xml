@@ -1,8 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.QQSwitcher" parent="Theme.AppCompat.Light.DarkActionBar">
-        <item name="colorPrimary">#1AAD19</item>
-        <item name="colorPrimaryDark">#0D8C0F</item>
-        <item name="colorAccent">#1AAD19</item>
-    </style>
+    <style name="Theme.QQSwitcher" parent="android:Theme.NoTitleBar.Fullscreen"/>
 </resources>
