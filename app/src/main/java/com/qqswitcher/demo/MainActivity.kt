@@ -13,36 +13,30 @@ import android.webkit.*
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.google.gson.Gson
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
+import java.io.*
 import java.net.ServerSocket
-import java.net.Socket
 import java.net.URLDecoder
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.concurrent.thread
 
 /**
- * QQ 上号器（HTTP Server 版）
+ * QQ 上号器 v2（Token 注入版）
  *
  * 流程：
- * 1. App 启动后开启 HTTP 端口 8888
- * 2. PC 前端扫 QQ 二维码拿到 token → POST 到 http://雷电IP:8888/inject
- * 3. App 注入 Cookie → 拉起游戏
+ * PC 扫码 → 拿到 access_token → POST 到 http://雷电IP:8888/inject
+ * → App 写入游戏 QQ SDK 存储 → 拉起王者 → 自动登录
  */
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val HTTP_PORT = 8888
-        private const val GAME_PACKAGE = "com.tencent.tmgp.sgame"
-        private val QQ_DOMAINS = listOf(
-            "https://qq.com", "https://.qq.com",
-            "https://connect.qq.com", "https://.connect.qq.com",
-            "https://openmobile.qq.com", "https://.openmobile.qq.com",
-            "https://ptlogin4.qq.com", "https://.ptlogin4.qq.com",
-            "https://ui.ptlogin2.qq.com"
-        )
+        private const val GAME_PACKAGE = "com.tencent.tmgp.sgame"  // 王者荣耀
+
+        // QQ OAuth 配置（从扫码 URL 提取）
+        private const val APP_ID = "716027609"
+        private const val THIRD_APP_ID = "1104466820"
+        private const val DAID = "381"
     }
 
     private lateinit var logPanel: TextView
@@ -51,12 +45,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ipText: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var webView: WebView? = null
-    private var serverSocket: ServerSocket? = null
-    private var serverRunning = false
 
-    // ============================================================
-    // Lifecycle
-    // ============================================================
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -66,22 +55,20 @@ class MainActivity : AppCompatActivity() {
         statusDot = findViewById(R.id.statusDot)
         ipText = findViewById(R.id.ipText)
 
-        log("🦞 QQ 上号器启动")
-
+        log("🦞 QQ 上号器 v2")
+        log("🎯 目标: $GAME_PACKAGE")
         initWebView()
         startHttpServer()
         showLocalIp()
     }
 
     override fun onDestroy() {
-        serverRunning = false
-        serverSocket?.close()
         webView?.destroy()
         super.onDestroy()
     }
 
     // ============================================================
-    // WebView
+    // WebView（隐藏，用于 OAuth Cookie 注入）
     // ============================================================
     private fun initWebView() {
         val wv = WebView(this)
@@ -95,46 +82,17 @@ class MainActivity : AppCompatActivity() {
                 databaseEnabled = true
                 cacheMode = WebSettings.LOAD_NO_CACHE
                 userAgentString = WebSettings.getDefaultUserAgent(this@MainActivity)
-                allowContentAccess = true
-                loadWithOverviewMode = true
-                useWideViewPort = true
-                builtInZoomControls = false
-                displayZoomControls = false
-                allowFileAccess = false
+                allowFileAccess = true
             }
 
             webViewClient = object : WebViewClient() {
-                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                    log("🌐 加载: ${url?.take(100)}...")
-                }
-
                 override fun onPageFinished(view: WebView?, url: String?) {
                     log("✅ 页面完成: ${url?.take(80)}...")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        CookieManager.getInstance().flush()
-                    }
-                    // 认证成功 → 拉游戏
+                    CookieManager.getInstance().flush()
                     if (url?.contains("connect.qq.com") == true) {
                         log("🎉 认证成功，准备上游戏!")
                         launchGame()
                     }
-                }
-
-                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    val url = request?.url?.toString() ?: return false
-                    if (url.startsWith("tencent") || url.startsWith("com.tencent")) {
-                        log("🎮 游戏协议: ${url.take(60)}...")
-                        try {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            })
-                            return true
-                        } catch (e: Exception) {
-                            launchGame()
-                            return true
-                        }
-                    }
-                    return url.contains("qq.com") || url.contains("tencent.com")
                 }
             }
 
@@ -142,35 +100,30 @@ class MainActivity : AppCompatActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
             }
-
             (window.decorView as ViewGroup).addView(this)
         }
         webView = wv
-        log("🔧 WebView 就绪（隐藏）")
     }
 
     // ============================================================
-    // HTTP Server
+    // HTTP Server → 接收前端 token
     // ============================================================
     private fun startHttpServer() {
-        serverRunning = true
         thread(name = "HttpServer") {
             try {
-                serverSocket = ServerSocket(HTTP_PORT)
-                log("🌐 HTTP 服务已启动: 端口 $HTTP_PORT")
+                val serverSocket = ServerSocket(HTTP_PORT)
+                log("🌐 HTTP 服务启动: 端口 $HTTP_PORT")
                 log("📮 POST http://你的IP:$HTTP_PORT/inject")
                 log("")
 
-                while (serverRunning) {
+                while (true) {
                     try {
-                        val client = serverSocket!!.accept()
+                        val client = serverSocket.accept()
                         handleClient(client)
-                    } catch (e: Exception) {
-                        if (serverRunning) log("⚠️ 连接错误: ${e.message}")
-                    }
+                    } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
-                log("❌ HTTP 服务启动失败: ${e.message}")
+                log("❌ HTTP 服务失败: ${e.message}")
             }
         }
     }
@@ -186,7 +139,7 @@ class MainActivity : AppCompatActivity() {
                 val method = parts[0]
                 val path = parts[1]
 
-                // 读取请求头
+                // 读请求头
                 var contentLength = 0
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
@@ -196,7 +149,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // 读取请求体
+                // 读请求体
                 val body = if (contentLength > 0) {
                     val buffer = CharArray(contentLength)
                     reader.read(buffer, 0, contentLength)
@@ -208,15 +161,13 @@ class MainActivity : AppCompatActivity() {
 
                 when {
                     path == "/inject" && method == "POST" -> {
-                        log("📥 收到 token: ${body.take(100)}...")
+                        log("📥 收到 token: ${body.take(80)}...")
                         val result = processToken(body)
                         responseBody = "{\"code\":0,\"msg\":\"$result\"}"
                         statusCode = "200 OK"
                     }
                     path == "/" && method == "GET" -> {
-                        responseBody = """
-                            {"status":"running","port":$HTTP_PORT,"game":"$GAME_PACKAGE"}
-                        """.trimIndent()
+                        responseBody = """{"status":"running","port":$HTTP_PORT}"""
                         statusCode = "200 OK"
                     }
                     else -> {
@@ -230,62 +181,131 @@ class MainActivity : AppCompatActivity() {
                         "Content-Length: ${responseBody.toByteArray(Charsets.UTF_8).size}\r\n" +
                         "Connection: close\r\n" +
                         "Access-Control-Allow-Origin: *\r\n" +
-                        "\r\n" +
-                        responseBody
+                        "\r\n" + responseBody
 
                 val writer = OutputStreamWriter(client.getOutputStream(), "UTF-8")
                 writer.write(resp)
                 writer.flush()
-            } catch (e: Exception) {
-                Log.e(TAG, "请求处理失败: ${e.message}")
-            } finally {
-                try { client.close() } catch (_: Exception) {}
-            }
+            } catch (_: Exception) {}
+            finally { try { client.close() } catch (_: Exception) {} }
         }
     }
 
     // ============================================================
-    // Token Processing
+    // Token 处理核心
     // ============================================================
     private fun processToken(body: String): String {
         return try {
-            // 尝试解析 JSON
-            val json = Gson().fromJson(body, TokenPayload::class.java)
+            // 解析 JSON
+            val token = Gson().fromJson(body, QQToken::class.java)
+            if (token.access_token.isNullOrBlank()) return "缺少 access_token"
 
-            // 1. 清除旧 Cookie
-            clearCookies()
-            log("🧹 旧 Cookie 已清")
+            log("👤 QQ号: ${token.openid?.take(10)}...")
+            log("🔑 access_token: ${token.access_token?.take(16)}...")
 
-            // 2. 注入 Cookie
-            if (!json.cookie.isNullOrBlank()) {
-                injectCookies(json.cookie!!)
-                log("☑️ Cookie 注入完成")
-            }
-
-            // 3. 如果有 authUrl 就加载
-            if (!json.authUrl.isNullOrBlank()) {
-                handler.post {
-                    val wv = webView
-                    wv?.loadUrl(json.authUrl!!)
-                    log("🚀 加载认证 URL")
-                }
-                "认证 URL 已加载"
-            } else if (!json.cookie.isNullOrBlank()) {
-                // 只有 Cookie → 直接开游戏
+            // === 方案 A: Root 注入 QQ SDK SharedPreferences（推荐）===
+            if (injectToSdkPrefs(token)) {
+                log("✅ Scheme A: 写入 QQ SDK 存储成功")
                 handler.post { launchGame() }
-                "Cookie 已注入，正在开游戏"
-            } else {
-                "${json.uin ?: "未知"} 已接收"
+                return "Root 注入成功，启动游戏"
             }
+
+            // === 方案 B: 构造 OAuth 回调 URL → WebView 加载 ===
+            log("⚠️ 未获取 Root，尝试 WebView 方案...")
+            val authUrl = buildAuthUrl(token)
+            log("🔗 加载认证 URL")
+            clearCookies()
+            handler.post {
+                webView?.loadUrl(authUrl)
+            }
+            "WebView 认证中..."
+
         } catch (e: Exception) {
-            // 不是 JSON → 可能是纯 Cookie 字符串
+            // 不是 JSON → 当纯 Cookie 处理
+            log("⚠️ JSON 解析失败，尝试纯 Cookie 注入: ${e.message}")
             clearCookies()
             injectCookies(body)
             handler.post { launchGame() }
-            "纯 Cookie 已注入"
+            "Cookie 已注入"
         }
     }
 
+    // ============================================================
+    // 方案 A: Root 注入 QQ SDK SharedPreferences
+    // ============================================================
+    private fun injectToSdkPrefs(token: QQToken): Boolean {
+        val openid = token.openid ?: return false
+        val accessToken = token.access_token ?: return false
+
+        // QQ SDK 存 token 的文件路径（v3+ 版本）
+        val prefPaths = listOf(
+            // 方式 1: 游戏内置 QQ SDK
+            "/data/data/$GAME_PACKAGE/shared_prefs/${APP_ID}_${openid}_${APP_ID}.xml",
+            "/data/data/$GAME_PACKAGE/shared_prefs/tencent_auth.xml",
+            "/data/data/$GAME_PACKAGE/shared_prefs/${THIRD_APP_ID}_preferences.xml",
+            // 方式 2: 系统 QQ 的 SSO 存储
+            "/data/data/com.tencent.mobileqq/shared_prefs/qq_sso_preferences.xml",
+            "/data/data/com.tencent.mobileqq/shared_prefs/last_login_uin.xml",
+        )
+
+        val prefXml = buildPrefXml(token)
+
+        for (path in prefPaths) {
+            try {
+                // 尝试创建目录
+                val dir = path.substringBeforeLast("/")
+                execRoot("mkdir -p $dir")
+                execRoot("chmod 777 $dir")
+
+                // 写入 token XML
+                execRoot("echo '$prefXml' > '$path'")
+                execRoot("chmod 666 $path")
+
+                log("📝 写入: $path")
+            } catch (_: Exception) {}
+        }
+
+        // 验证是否至少成功写入了游戏目录
+        val result = execRoot("ls -la /data/data/$GAME_PACKAGE/shared_prefs/")
+        log("📂 目录结构:\n${result.take(300)}")
+
+        return result.contains(APP_ID) || result.contains("tencent_auth")
+    }
+
+    private fun buildPrefXml(token: QQToken): String {
+        val now = System.currentTimeMillis() / 1000
+        val expiresAt = now + (token.expires_in?.toLongOrNull() ?: 5184000L)
+
+        return """<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="access_token">${token.access_token}</string>
+    <string name="expires_in">${token.expires_in ?: "5184000"}</string>
+    <string name="openid">${token.openid}</string>
+    <string name="pay_token">${token.pay_token ?: ""}</string>
+    <string name="pf">${token.pf ?: "openmobile_android"}</string>
+    <string name="pfkey">${token.pfkey ?: ""}</string>
+    <long name="expires_at" value="$expiresAt" />
+    <long name="auth_time" value="${token.auth_time ?: "$now"}" />
+    <int name="ret" value="0" />
+</map>"""
+    }
+
+    // ============================================================
+    // 方案 B: OAuth 回调 URL → WebView
+    // ============================================================
+    private fun buildAuthUrl(token: QQToken): String {
+        // 用 access_token 构造 QQ OAuth 回调，让 QQ SDK 识别
+        return "https://graph.qq.com/oauth2.0/login?" +
+                "access_token=${token.access_token}" +
+                "&openid=${token.openid}" +
+                "&expires_in=${token.expires_in ?: "5184000"}" +
+                "&ret=0" +
+                "&s_url=https%3A%2F%2Fconnect.qq.com"
+    }
+
+    // ============================================================
+    // Cookie 注入（备选方案）
+    // ============================================================
     private fun clearCookies() {
         val cm = CookieManager.getInstance()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -300,20 +320,47 @@ class MainActivity : AppCompatActivity() {
 
     private fun injectCookies(cookieStr: String) {
         val cm = CookieManager.getInstance()
-        val cookies = cookieStr.split(";").map { it.trim() }.filter { it.isNotBlank() }
-
-        cookies.forEach { cookie ->
-            QQ_DOMAINS.forEach { domain ->
+        val qqDomains = listOf(
+            ".qq.com", ".connect.qq.com", ".openmobile.qq.com",
+            ".ptlogin4.qq.com", ".ui.ptlogin2.qq.com"
+        )
+        cookieStr.split(";").map { it.trim() }.filter { it.isNotBlank() }.forEach { cookie ->
+            qqDomains.forEach { domain ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    cm.setCookie(domain, "$cookie; domain=${domain.removePrefix("https://")}")
+                    cm.setCookie("https:$domain", "$cookie; domain=$domain")
                 } else {
-                    cm.setCookie(domain, cookie)
+                    cm.setCookie("https:$domain", cookie)
                 }
             }
         }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             cm.flush()
+        }
+    }
+
+    // ============================================================
+    // Root Shell
+    // ============================================================
+    private fun execRoot(cmd: String): String {
+        return try {
+            val process = Runtime.getRuntime().exec("su")
+            val os = DataOutputStream(process.outputStream)
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+
+            os.writeBytes("$cmd\n")
+            os.writeBytes("exit\n")
+            os.flush()
+
+            val output = StringBuilder()
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                output.append(line).append("\n")
+            }
+            process.waitFor()
+            output.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Root 执行失败: ${e.message}")
+            ""
         }
     }
 
@@ -322,7 +369,6 @@ class MainActivity : AppCompatActivity() {
     // ============================================================
     private fun launchGame() {
         log("🎯 启动游戏: $GAME_PACKAGE")
-        setStatus("✅ 正在上号...")
         try {
             val intent = packageManager.getLaunchIntentForPackage(GAME_PACKAGE)
             if (intent != null) {
@@ -332,7 +378,6 @@ class MainActivity : AppCompatActivity() {
                 setStatus("✅ 已上号")
             } else {
                 log("⚠️ 游戏未安装")
-                setStatus("❌ 游戏未安装")
             }
         } catch (e: Exception) {
             log("❌ 启动失败: ${e.message}")
@@ -354,13 +399,10 @@ class MainActivity : AppCompatActivity() {
                     if (addr is java.net.Inet4Address) {
                         val ip = addr.hostAddress
                         if (!ip.startsWith("127.")) {
-                            handler.post {
-                                ipText.text = ip
-                            }
-                            log("📡 本机IP: $ip")
+                            handler.post { ipText.text = ip }
+                            log("📡 IP: $ip:$HTTP_PORT")
                             log("📮 POST → http://$ip:$HTTP_PORT/inject")
-                            log("")
-                            setStatus("等待接收 token...")
+                            setStatus("等待 token...")
                             return
                         }
                     }
@@ -386,14 +428,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ============================================================
-    // Data
+    // Data Model
     // ============================================================
-    data class TokenPayload(
-        val uin: String? = null,
-        val nick: String? = null,
-        val cookie: String? = null,
-        val authUrl: String? = null,
-        val ptsigx: String? = null
+    data class QQToken(
+        val access_token: String? = null,
+        val expires_in: String? = "5184000",
+        val openid: String? = null,
+        val pay_token: String? = null,
+        val pf: String? = "openmobile_android",
+        val pfkey: String? = null,
+        val auth_time: String? = null,
+        val state: String? = null,
+        val ret: String? = "0"
     )
 
     private val TAG = "QQSwitcher"
