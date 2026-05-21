@@ -8,8 +8,10 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.net.http.SslError
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.view.isVisible
 import android.webkit.*
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -137,7 +139,7 @@ class MainActivity : AppCompatActivity() {
         val wv = WebView(this)
         wv.apply {
             layoutParams = ViewGroup.LayoutParams(1, 1) // 隐藏：1x1 像素
-            isVisible = false  // 完全不可见
+            visibility = View.GONE  // 完全不可见
 
             settings.apply {
                 javaScriptEnabled = true
